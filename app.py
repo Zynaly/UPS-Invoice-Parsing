@@ -13,9 +13,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['OUTPUT_FOLDER'] = 'outputs'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 500MB max file size
+app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
+app.config['OUTPUT_FOLDER'] = '/tmp/outputs'
+
 
 # Create directories if they don't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -181,5 +182,4 @@ def status():
         'message': 'Invoice Extraction Service is operational'
     })
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+ 
