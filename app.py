@@ -5,30 +5,21 @@ from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime
 import logging
-import tempfile
-import sys
-
-# Add the current directory to Python path for imports
-sys.path.append(os.path.dirname(__file__))
-
-try:
-    from text_extractor import PDFTextExtractor
-    from invoice_parser import InvoiceParser
-except ImportError:
-    # Fallback if modules aren't available
-    PDFTextExtractor = None
-    InvoiceParser = None
+from text_extractor import PDFTextExtractor
+from invoice_parser import InvoiceParser
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['OUTPUT_FOLDER'] = 'outputs'
 
-# Use temporary directories for Vercel
-app.config['UPLOAD_FOLDER'] = tempfile.mkdtemp()
-app.config['OUTPUT_FOLDER'] = tempfile.mkdtemp()
+# Create directories if they don't exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'pdf'}
 
@@ -38,23 +29,12 @@ def allowed_file(filename):
 @app.route('/')
 def index():
     """Serve the main page"""
-    # For Vercel, you might want to serve a simple HTML or redirect to a static page
-    return jsonify({
-        'message': 'Invoice Extraction Service',
-        'endpoints': {
-            'upload': '/api/upload',
-            'status': '/api/status',
-            'download': '/api/download/<id>'
-        }
-    })
+    return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Handle PDF file upload and process it"""
     try:
-        if not PDFTextExtractor or not InvoiceParser:
-            return jsonify({'error': 'PDF processing modules not available'}), 500
-            
         if 'file' not in request.files:
             return jsonify({'error': 'No file selected'}), 400
         
@@ -68,22 +48,17 @@ def upload_file():
         # Generate unique filename
         unique_id = str(uuid.uuid4())
         filename = secure_filename(file.filename)
+        pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{unique_id}_{filename}")
         
-        # Use temporary file for Vercel
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            file.save(tmp_file.name)
-            pdf_path = tmp_file.name
-        
+        # Save uploaded file
+        file.save(pdf_path)
         logger.info(f"File uploaded: {pdf_path}")
         
         # Process the PDF
         result = process_pdf(pdf_path, unique_id)
         
         # Clean up uploaded file
-        try:
-            os.remove(pdf_path)
-        except:
-            pass
+        os.remove(pdf_path)
         
         return jsonify(result)
         
@@ -138,9 +113,7 @@ def process_pdf(pdf_path, unique_id):
             df = pd.DataFrame(extracted_data)
             
             # Ensure all required columns exist
-            required_columns = ['invoice_number', 'account_number', 'invoice_date', 
-                              'shipment_date', 'tracking_number', 'receiver_name', 
-                              'receiver_address', 'page_number']
+            required_columns = ['invoice_number', 'account_number', 'invoice_date', 'shipment_date', 'tracking_number', 'receiver_name', 'receiver_address', 'page_number']
             for col in required_columns:
                 if col not in df.columns:
                     df[col] = ''
@@ -181,6 +154,14 @@ def download_file(download_id):
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
+        # Send file and clean up after sending
+        def remove_file(response):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            return response
+        
         return send_file(
             file_path,
             as_attachment=True,
@@ -197,14 +178,8 @@ def status():
     """API endpoint to check server status"""
     return jsonify({
         'status': 'running',
-        'message': 'Invoice Extraction Service is operational',
-        'platform': 'Vercel Serverless'
+        'message': 'Invoice Extraction Service is operational'
     })
 
-# This is required for Vercel
-def handler(request):
-    return app(request.environ, lambda status, headers: None)
-
-# For local development
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
