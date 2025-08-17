@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 500MB max file size
-app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
-app.config['OUTPUT_FOLDER'] = '/tmp/outputs'
+app.config['UPLOAD_FOLDER'] = '/uploads'
+app.config['OUTPUT_FOLDER'] = '/outputs'
 
 
 # Create directories if they don't exist
