@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Data Extractor</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .main-container {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            padding: 2rem;
+            margin-top: 2rem;
+        }
+        
+        .upload-area {
+            border: 3px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 15px;
+            padding: 3rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.05);
+            margin: 2rem 0;
+        }
+        
+        .upload-area:hover {
+            border-color: rgba(255, 255, 255, 0.6);
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area.dragover {
+            border-color: #28a745;
+            background: rgba(40, 167, 69, 0.1);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px 0 rgba(31, 38, 135, 0.4);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px 0 rgba(31, 38, 135, 0.6);
+        }
+        
+        .btn-success {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+        
+        .progress {
+            height: 25px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.2);
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+        }
+        
+        .result-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .text-white { color: white !important; }
+        .text-light { color: rgba(255, 255, 255, 0.8) !important; }
+        
+        .spinner-border {
+            color: white;
+        }
+        
+        .alert {
+            border-radius: 15px;
+            border: none;
+        }
+        
+        .alert-success {
+            background: rgba(40, 167, 69, 0.2);
+            color: white;
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+        
+        .alert-danger {
+            background: rgba(220, 53, 69, 0.2);
+            color: white;
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #28a745;
+        }
+        
+        .file-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="main-container">
+                    <div class="text-center mb-4">
+                        <h1 class="text-white mb-3">
+                            <i class="fas fa-file-invoice-dollar me-3"></i>
+                            Invoice Data Extractor
+                        </h1>
+                        <p class="text-light fs-5">Extract invoice data from PDF files using AI-powered LayoutLMv3</p>
+                    </div>
+                    
+                    <!-- File Upload Area -->
+                    <div class="upload-area" id="uploadArea">
+                        <div id="uploadContent">
+                            <i class="fas fa-cloud-upload-alt fa-4x text-white mb-3"></i>
+                            <h4 class="text-white mb-3">Drop your PDF file here</h4>
+                            <p class="text-light mb-4">or click to browse and select a file</p>
+                            <input type="file" id="fileInput" class="d-none" accept=".pdf">
+                            <button type="button" class="btn btn-primary btn-lg" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-folder-open me-2"></i>Choose PDF File
+                            </button>
+                            <p class="text-light mt-3 small">Maximum file size: 500MB</p>
+                        </div>
+                    </div>
+                    
+                    <!-- File Info -->
+                    <div id="fileInfo" class="file-info d-none">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h6 class="text-white mb-1">
+                                    <i class="fas fa-file-pdf me-2 text-danger"></i>
+                                    <span id="fileName"></span>
+                                </h6>
+                                <p class="text-light small mb-0">Size: <span id="fileSize"></span></p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button type="button" class="btn btn-primary" onclick="processFile()">
+                                    <i class="fas fa-cogs me-2"></i>Process File
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Processing Status -->
+                    <div id="processingStatus" class="d-none">
+                        <div class="text-center mb-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <h5 class="text-white mt-3">Processing your PDF...</h5>
+                            <p class="text-light">This may take a few minutes for large files</p>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 100%"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Results -->
+                    <div id="results" class="d-none">
+                        <!-- Success Result -->
+                        <div id="successResult" class="d-none">
+                            <div class="alert alert-success">
+                                <i class="fas fa-check-circle me-2"></i>
+                                <strong>Success!</strong> <span id="successMessage"></span>
+                            </div>
+                            
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <div class="stat-number" id="totalPages">0</div>
+                                    <div class="text-light">Total Pages</div>
+                                </div>
+                                <div class="stat-item">
+                                    <div class="stat-number" id="totalShipments">0</div>
+                                    <div class="text-light">Shipments Found</div>
+                                </div>
+                            </div>
+                            
+                            <div class="text-center mt-4">
+                                <button type="button" class="btn btn-success btn-lg" id="downloadBtn">
+                                    <i class="fas fa-download me-2"></i>Download CSV File
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Error Result -->
+                        <div id="errorResult" class="d-none">
+                            <div class="alert alert-danger">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                <strong>Error:</strong> <span id="errorMessage"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Process Another File -->
+                    <div id="processAnother" class="text-center mt-4 d-none">
+                        <button type="button" class="btn btn-primary" onclick="resetForm()">
+                            <i class="fas fa-plus me-2"></i>Process Another File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let selectedFile = null;
+        let downloadId = null;
+        
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            handleFileSelect(e.target.files[0]);
+        });
+        
+        // Drag and drop handlers
+        const uploadArea = document.getElementById('uploadArea');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+        
+        function handleFileSelect(file) {
+            if (!file) return;
+            
+            if (file.type !== 'application/pdf') {
+                alert('Please select a PDF file only.');
+                return;
+            }
+            
+            selectedFile = file;
+            
+            // Show file info
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = formatFileSize(file.size);
+            document.getElementById('fileInfo').classList.remove('d-none');
+            
+            // Hide upload area
+            uploadArea.style.display = 'none';
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function processFile() {
+            if (!selectedFile) {
+                alert('Please select a file first.');
+                return;
+            }
+            
+            // Show processing status
+            document.getElementById('fileInfo').classList.add('d-none');
+            document.getElementById('processingStatus').classList.remove('d-none');
+            document.getElementById('results').classList.add('d-none');
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            
+            // Upload and process
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('processingStatus').classList.add('d-none');
+                document.getElementById('results').classList.remove('d-none');
+                
+                if (data.success) {
+                    showSuccess(data);
+                } else {
+                    showError(data.message || 'Processing failed');
+                }
+            })
+            .catch(error => {
+                document.getElementById('processingStatus').classList.add('d-none');
+                document.getElementById('results').classList.remove('d-none');
+                showError('Network error: ' + error.message);
+            });
+        }
+        
+        function showSuccess(data) {
+            document.getElementById('successMessage').textContent = data.message;
+            document.getElementById('totalPages').textContent = data.total_pages;
+            document.getElementById('totalShipments').textContent = data.total_shipments;
+            
+            downloadId = data.download_id;
+            
+            document.getElementById('successResult').classList.remove('d-none');
+            document.getElementById('errorResult').classList.add('d-none');
+            document.getElementById('processAnother').classList.remove('d-none');
+            
+            // Set up download button
+            document.getElementById('downloadBtn').onclick = function() {
+                window.location.href = '/download/' + downloadId;
+            };
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('successResult').classList.add('d-none');
+            document.getElementById('errorResult').classList.remove('d-none');
+            document.getElementById('processAnother').classList.remove('d-none');
+        }
+        
+        function resetForm() {
+            selectedFile = null;
+            downloadId = null;
+            
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').classList.add('d-none');
+            document.getElementById('processingStatus').classList.add('d-none');
+            document.getElementById('results').classList.add('d-none');
+            document.getElementById('processAnother').classList.add('d-none');
+            
+            uploadArea.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
