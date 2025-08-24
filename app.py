@@ -335,5 +335,5 @@ def internal_error(e):
 
 if __name__ == '__main__':
     logger.info("=== STARTING FLASK-SOCKETIO SERVER ===")
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000)
 
