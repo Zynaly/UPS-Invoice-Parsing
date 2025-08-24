@@ -31,4 +31,5 @@ COPY . .
 EXPOSE 5000
 
 # Run your app (change if not Flask)
-CMD ["python", "app.py"]
+ENTRYPOINT ["python3", "app.py"]
+
