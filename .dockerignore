@@ -9,3 +9,8 @@ venv/
 .env
 node_modules/
 datasets/
+checkpoints/
+models/
+*.ipynb
+*.pt
+*.bin
