@@ -3,387 +3,887 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Invoice Data Extractor</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>Invoice Parser</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0c0c0c 0%, #1a1a1a 50%, #0f0f23 100%);
             min-height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
         }
-        
-        .main-container {
-            backdrop-filter: blur(10px);
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-            padding: 2rem;
-            margin-top: 2rem;
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 219, 226, 0.1) 0%, transparent 50%);
+            pointer-events: none;
         }
-        
-        .upload-area {
-            border: 3px dashed rgba(255, 255, 255, 0.3);
-            border-radius: 15px;
-            padding: 3rem;
+
+        .container {
+            background: rgba(17, 17, 17, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            box-shadow: 
+                0 32px 64px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            padding: 48px;
+            max-width: 600px;
+            width: 100%;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
             text-align: center;
-            transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.05);
-            margin: 2rem 0;
+            margin-bottom: 48px;
         }
-        
-        .upload-area:hover {
-            border-color: rgba(255, 255, 255, 0.6);
-            background: rgba(255, 255, 255, 0.1);
-            transform: translateY(-2px);
+
+        .logo {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin: 0 auto 24px;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
         }
-        
-        .upload-area.dragover {
-            border-color: #28a745;
-            background: rgba(40, 167, 69, 0.1);
+
+        h1 {
+            color: #ffffff;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
         }
-        
-        .btn-primary {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            border: none;
-            border-radius: 25px;
-            padding: 12px 30px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px 0 rgba(31, 38, 135, 0.4);
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 16px;
+            font-weight: 400;
+            line-height: 1.5;
         }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px 0 rgba(31, 38, 135, 0.6);
+
+        .upload-section {
+            margin-bottom: 32px;
         }
-        
-        .btn-success {
-            background: linear-gradient(45deg, #28a745, #20c997);
-            border: none;
-            border-radius: 25px;
-            padding: 12px 30px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.3s ease;
-        }
-        
-        .progress {
-            height: 25px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.2);
+
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 48px 32px;
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.02);
+            position: relative;
             overflow: hidden;
         }
-        
-        .progress-bar {
-            background: linear-gradient(45deg, #28a745, #20c997);
-            transition: width 0.3s ease;
+
+        .upload-area::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+            transition: left 0.5s ease;
         }
-        
-        .result-card {
+
+        .upload-area:hover::before {
+            left: 100%;
+        }
+
+        .upload-area:hover {
+            border-color: rgba(102, 126, 234, 0.5);
+            background: rgba(102, 126, 234, 0.05);
+            transform: translateY(-2px);
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            width: 48px;
+            height: 48px;
             background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 1.5rem;
-            margin-top: 2rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin: 0 auto 16px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .upload-text {
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-subtext {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .upload-hint {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin: 24px 0;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.3s ease;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 25px rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-outline {
+            background: transparent;
             border: 1px solid rgba(255, 255, 255, 0.2);
         }
-        
-        .text-white { color: white !important; }
-        .text-light { color: rgba(255, 255, 255, 0.8) !important; }
-        
-        .spinner-border {
-            color: white;
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.3);
         }
-        
-        .alert {
-            border-radius: 15px;
-            border: none;
+
+        .file-input {
+            display: none;
         }
-        
-        .alert-success {
-            background: rgba(40, 167, 69, 0.2);
-            color: white;
-            border: 1px solid rgba(40, 167, 69, 0.3);
+
+        .progress-section {
+            margin: 24px 0;
+            display: none;
         }
-        
-        .alert-danger {
-            background: rgba(220, 53, 69, 0.2);
-            color: white;
-            border: 1px solid rgba(220, 53, 69, 0.3);
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin: 1rem 0;
-        }
-        
-        .stat-item {
+
+        .progress {
+            width: 100%;
+            height: 8px;
             background: rgba(255, 255, 255, 0.1);
-            padding: 1rem;
-            border-radius: 10px;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background-image: linear-gradient(
+                -45deg,
+                rgba(255, 255, 255, 0.2) 25%,
+                transparent 25%,
+                transparent 50%,
+                rgba(255, 255, 255, 0.2) 50%,
+                rgba(255, 255, 255, 0.2) 75%,
+                transparent 75%,
+                transparent
+            );
+            background-size: 30px 30px;
+            animation: progress-bar-stripes 1s linear infinite;
+        }
+
+        @keyframes progress-bar-stripes {
+            0% {
+                background-position: 30px 0;
+            }
+            100% {
+                background-position: 0 0;
+            }
+        }
+
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .progress-status {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
             text-align: center;
         }
-        
-        .stat-number {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #28a745;
+
+        .progress-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 16px;
         }
-        
+
+        .progress-stat {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .progress-stat-number {
+            font-size: 18px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 4px;
+        }
+
+        .progress-stat-label {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .result {
+            margin-top: 24px;
+            padding: 20px;
+            border-radius: 12px;
+            display: none;
+            backdrop-filter: blur(10px);
+        }
+
+        .result.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .result.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #ffffff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            margin-top: 16px;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .download-link:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 25px rgba(34, 197, 94, 0.3);
+        }
+
         .file-info {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 1rem;
-            border-radius: 10px;
-            margin: 1rem 0;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .file-details {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .file-name {
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .file-status {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+        }
+
+        .file-size {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin: 20px 0;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.connected {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .debug-log {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            max-width: 400px;
+            max-height: 300px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.9);
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            z-index: 1000;
+            display: none;
+            border: 1px solid rgba(0, 255, 0, 0.3);
+        }
+
+        .debug-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            z-index: 1001;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 32px 24px;
+            }
+            
+            .upload-area {
+                padding: 32px 20px;
+            }
+            
+            .btn-group {
+                flex-direction: column;
+            }
+            
+            .file-details {
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .progress-details {
+                grid-template-columns: 1fr;
+            }
+
+            .debug-log {
+                left: 10px;
+                right: 10px;
+                max-width: none;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="connection-status disconnected" id="connectionStatus">
+        🔴 Disconnected
+    </div>
+
+    <div class="debug-toggle" id="debugToggle">Show Debug</div>
+    <div class="debug-log" id="debugLog"></div>
+
     <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-10">
-                <div class="main-container">
-                    <div class="text-center mb-4">
-                        <h1 class="text-white mb-3">
-                            <i class="fas fa-file-invoice-dollar me-3"></i>
-                            Invoice Data Extractor
-                        </h1>
-                        <p class="text-light fs-5">Extract invoice data from PDF files using AI-powered LayoutLMv3</p>
-                    </div>
-                    
-                    <!-- File Upload Area -->
-                    <div class="upload-area" id="uploadArea">
-                        <div id="uploadContent">
-                            <i class="fas fa-cloud-upload-alt fa-4x text-white mb-3"></i>
-                            <h4 class="text-white mb-3">Drop your PDF file here</h4>
-                            <p class="text-light mb-4">or click to browse and select a file</p>
-                            <input type="file" id="fileInput" class="d-none" accept=".pdf">
-                            <button type="button" class="btn btn-primary btn-lg" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-folder-open me-2"></i>Choose PDF File
-                            </button>
-                            <p class="text-light mt-3 small">Maximum file size: 500MB</p>
-                        </div>
-                    </div>
-                    
-                    <!-- File Info -->
-                    <div id="fileInfo" class="file-info d-none">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <h6 class="text-white mb-1">
-                                    <i class="fas fa-file-pdf me-2 text-danger"></i>
-                                    <span id="fileName"></span>
-                                </h6>
-                                <p class="text-light small mb-0">Size: <span id="fileSize"></span></p>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                <button type="button" class="btn btn-primary" onclick="processFile()">
-                                    <i class="fas fa-cogs me-2"></i>Process File
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Processing Status -->
-                    <div id="processingStatus" class="d-none">
-                        <div class="text-center mb-4">
-                            <div class="spinner-border" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <h5 class="text-white mt-3">Processing your PDF...</h5>
-                            <p class="text-light">This may take a few minutes for large files</p>
-                        </div>
-                        <div class="progress">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                 role="progressbar" style="width: 100%"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Results -->
-                    <div id="results" class="d-none">
-                        <!-- Success Result -->
-                        <div id="successResult" class="d-none">
-                            <div class="alert alert-success">
-                                <i class="fas fa-check-circle me-2"></i>
-                                <strong>Success!</strong> <span id="successMessage"></span>
-                            </div>
-                            
-                            <div class="stats-grid">
-                                <div class="stat-item">
-                                    <div class="stat-number" id="totalPages">0</div>
-                                    <div class="text-light">Total Pages</div>
-                                </div>
-                                <div class="stat-item">
-                                    <div class="stat-number" id="totalShipments">0</div>
-                                    <div class="text-light">Shipments Found</div>
-                                </div>
-                            </div>
-                            
-                            <div class="text-center mt-4">
-                                <button type="button" class="btn btn-success btn-lg" id="downloadBtn">
-                                    <i class="fas fa-download me-2"></i>Download CSV File
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <!-- Error Result -->
-                        <div id="errorResult" class="d-none">
-                            <div class="alert alert-danger">
-                                <i class="fas fa-exclamation-triangle me-2"></i>
-                                <strong>Error:</strong> <span id="errorMessage"></span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Process Another File -->
-                    <div id="processAnother" class="text-center mt-4 d-none">
-                        <button type="button" class="btn btn-primary" onclick="resetForm()">
-                            <i class="fas fa-plus me-2"></i>Process Another File
-                        </button>
-                    </div>
+        <div class="header">
+            <div class="logo">📄</div>
+            <h1>Invoice Parser</h1>
+            <p class="subtitle">Extract data from PDF invoices with precision and speed</p>
+        </div>
+        
+        <div class="upload-section">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📎</div>
+                <div class="upload-text">Drop your PDF here</div>
+                <div class="upload-subtext">or click to browse</div>
+                <div class="upload-hint">Support for files up to 50MB</div>
+            </div>
+            
+            <div class="btn-group">
+                <button class="btn" onclick="document.getElementById('fileInput').click()">
+                    <span>📁</span>
+                    Browse Files
+                </button>
+                <button class="btn btn-outline" id="clearBtn" style="display: none;">
+                    <span>🗑️</span>
+                    Clear
+                </button>
+            </div>
+        </div>
+        
+        <input type="file" id="fileInput" class="file-input" accept=".pdf">
+        
+        <div class="progress-section" id="progressSection">
+            <div class="progress-text">
+                <span id="progressLabel">Processing...</span>
+                <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="progress-status" id="progressStatus">Initializing...</div>
+            <div class="progress-details">
+                <div class="progress-stat">
+                    <div class="progress-stat-number" id="currentPage">0</div>
+                    <div class="progress-stat-label">Current Page</div>
+                </div>
+                <div class="progress-stat">
+                    <div class="progress-stat-number" id="shipmentsFound">0</div>
+                    <div class="progress-stat-label">Shipments Found</div>
                 </div>
             </div>
         </div>
+        
+        <div class="btn-group" id="processGroup" style="display: none;">
+            <button class="btn" id="uploadBtn">
+                <span>⚡</span>
+                Process Invoice
+            </button>
+        </div>
+        
+        <div class="result" id="result"></div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     <script>
-        let selectedFile = null;
-        let downloadId = null;
-        
-        // File input change handler
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            handleFileSelect(e.target.files[0]);
+        // Debug logging
+        const debugLog = document.getElementById('debugLog');
+        const debugToggle = document.getElementById('debugToggle');
+        let debugVisible = false;
+
+        function addDebugLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            debugLog.appendChild(logEntry);
+            debugLog.scrollTop = debugLog.scrollHeight;
+            console.log(`[DEBUG] ${message}`);
+        }
+
+        debugToggle.addEventListener('click', () => {
+            debugVisible = !debugVisible;
+            debugLog.style.display = debugVisible ? 'block' : 'none';
+            debugToggle.textContent = debugVisible ? 'Hide Debug' : 'Show Debug';
         });
+
+        // Initialize Socket.IO
+        addDebugLog('Initializing Socket.IO connection...');
+        const socket = io();
+        const sessionId = Math.random().toString(36).substring(2, 15);
+        addDebugLog(`Generated session ID: ${sessionId}`);
         
-        // Drag and drop handlers
+        // DOM elements
         const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const processGroup = document.getElementById('processGroup');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const progressLabel = document.getElementById('progressLabel');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressStatus = document.getElementById('progressStatus');
+        const currentPage = document.getElementById('currentPage');
+        const shipmentsFound = document.getElementById('shipmentsFound');
+        const result = document.getElementById('result');
+        const connectionStatus = document.getElementById('connectionStatus');
         
-        uploadArea.addEventListener('dragover', function(e) {
+        let selectedFile = null;
+        let downloadFilename = null;
+
+        // Socket.IO event listeners
+        socket.on('connect', () => {
+            addDebugLog('Connected to server');
+            connectionStatus.className = 'connection-status connected';
+            connectionStatus.innerHTML = '🟢 Connected';
+            
+            addDebugLog(`Joining session: ${sessionId}`);
+            socket.emit('join_session', { session_id: sessionId });
+        });
+
+        socket.on('disconnect', () => {
+            addDebugLog('Disconnected from server');
+            connectionStatus.className = 'connection-status disconnected';
+            connectionStatus.innerHTML = '🔴 Disconnected';
+        });
+
+        socket.on('connected', (data) => {
+            addDebugLog(`Server confirmed connection: ${JSON.stringify(data)}`);
+        });
+
+        socket.on('session_joined', (data) => {
+            addDebugLog(`Session joined: ${JSON.stringify(data)}`);
+        });
+
+        socket.on('progress_update', (data) => {
+            addDebugLog(`Progress update received: ${JSON.stringify(data)}`);
+            updateProgress(data);
+        });
+
+        socket.on('processing_complete', (data) => {
+            addDebugLog(`Processing complete: ${JSON.stringify(data)}`);
+            handleProcessingComplete(data);
+        });
+
+        socket.on('processing_error', (data) => {
+            addDebugLog(`Processing error: ${JSON.stringify(data)}`);
+            handleProcessingError(data);
+        });
+
+        // File handling
+        fileInput.addEventListener('change', handleFileSelect);
+        uploadArea.addEventListener('click', () => fileInput.click());
+        clearBtn.addEventListener('click', clearSelection);
+        uploadBtn.addEventListener('click', uploadFile);
+        
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadArea.classList.add('dragover');
         });
         
-        uploadArea.addEventListener('dragleave', function(e) {
-            e.preventDefault();
+        uploadArea.addEventListener('dragleave', () => {
             uploadArea.classList.remove('dragover');
         });
         
-        uploadArea.addEventListener('drop', function(e) {
+        uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
             uploadArea.classList.remove('dragover');
-            
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                handleFileSelect(files[0]);
+                fileInput.files = files;
+                handleFileSelect();
             }
         });
         
-        function handleFileSelect(file) {
+        function clearSelection() {
+            addDebugLog('Clearing file selection');
+            selectedFile = null;
+            downloadFilename = null;
+            fileInput.value = '';
+            uploadArea.innerHTML = `
+                <div class="upload-icon">📎</div>
+                <div class="upload-text">Drop your PDF here</div>
+                <div class="upload-subtext">or click to browse</div>
+                <div class="upload-hint">Support for files up to 50MB</div>
+            `;
+            processGroup.style.display = 'none';
+            clearBtn.style.display = 'none';
+            progressSection.style.display = 'none';
+            result.style.display = 'none';
+            resetProgress();
+        }
+        
+        function handleFileSelect() {
+            const file = fileInput.files[0];
             if (!file) return;
             
+            addDebugLog(`File selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+            
             if (file.type !== 'application/pdf') {
-                alert('Please select a PDF file only.');
+                addDebugLog('Error: File is not a PDF');
+                showResult('error', 'Please select a PDF file.');
+                return;
+            }
+            
+            if (file.size > 50 * 1024 * 1024) {
+                addDebugLog('Error: File too large');
+                showResult('error', 'File size must be less than 50MB.');
                 return;
             }
             
             selectedFile = file;
-            
-            // Show file info
-            document.getElementById('fileName').textContent = file.name;
-            document.getElementById('fileSize').textContent = formatFileSize(file.size);
-            document.getElementById('fileInfo').classList.remove('d-none');
-            
-            // Hide upload area
-            uploadArea.style.display = 'none';
+            uploadArea.innerHTML = `
+                <div class="file-info">
+                    <div class="file-details">
+                        <div>
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-status">Ready to process</div>
+                        </div>
+                        <div class="file-size">${(file.size / 1024 / 1024).toFixed(2)} MB</div>
+                    </div>
+                </div>
+            `;
+            processGroup.style.display = 'flex';
+            clearBtn.style.display = 'inline-flex';
+            result.style.display = 'none';
+            progressSection.style.display = 'none';
         }
         
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        
-        function processFile() {
+        async function uploadFile() {
             if (!selectedFile) {
-                alert('Please select a file first.');
+                addDebugLog('Error: No file selected');
                 return;
             }
             
-            // Show processing status
-            document.getElementById('fileInfo').classList.add('d-none');
-            document.getElementById('processingStatus').classList.remove('d-none');
-            document.getElementById('results').classList.add('d-none');
+            addDebugLog('Starting file upload...');
             
-            // Create form data
             const formData = new FormData();
             formData.append('file', selectedFile);
+            formData.append('session_id', sessionId);
             
-            // Upload and process
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('processingStatus').classList.add('d-none');
-                document.getElementById('results').classList.remove('d-none');
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span>⏳</span>Starting...';
+            clearBtn.style.display = 'none';
+            progressSection.style.display = 'block';
+            resetProgress();
+            
+            try {
+                addDebugLog('Sending upload request to server...');
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
                 
-                if (data.success) {
-                    showSuccess(data);
+                const data = await response.json();
+                addDebugLog(`Upload response: ${JSON.stringify(data)}`);
+                
+                if (response.ok && data.success) {
+                    downloadFilename = data.download_filename;
+                    progressLabel.textContent = 'Processing started...';
+                    progressStatus.textContent = 'Waiting for progress updates...';
+                    addDebugLog('Upload successful, waiting for WebSocket progress updates...');
                 } else {
-                    showError(data.message || 'Processing failed');
+                    addDebugLog(`Upload failed: ${data.error || 'Unknown error'}`);
+                    handleProcessingError({ error: data.error || 'Upload failed' });
                 }
-            })
-            .catch(error => {
-                document.getElementById('processingStatus').classList.add('d-none');
-                document.getElementById('results').classList.remove('d-none');
-                showError('Network error: ' + error.message);
-            });
+            } catch (error) {
+                addDebugLog(`Network error: ${error.message}`);
+                handleProcessingError({ error: 'Network error. Please try again.' });
+            }
         }
         
-        function showSuccess(data) {
-            document.getElementById('successMessage').textContent = data.message;
-            document.getElementById('totalPages').textContent = data.total_pages;
-            document.getElementById('totalShipments').textContent = data.total_shipments;
+        function updateProgress(data) {
+            addDebugLog(`Updating progress: ${data.percentage}% - Page ${data.current_page}/${data.total_pages}`);
             
-            downloadId = data.download_id;
+            const percentage = data.percentage || 0;
+            progressBar.style.width = percentage + '%';
+            progressPercent.textContent = percentage + '%';
+            progressStatus.textContent = data.status || 'Processing...';
+            currentPage.textContent = data.current_page || 0;
             
-            document.getElementById('successResult').classList.remove('d-none');
-            document.getElementById('errorResult').classList.add('d-none');
-            document.getElementById('processAnother').classList.remove('d-none');
+            if (data.shipments_found !== undefined) {
+                shipmentsFound.textContent = data.shipments_found;
+            }
             
-            // Set up download button
-            document.getElementById('downloadBtn').onclick = function() {
-                window.location.href = '/download/' + downloadId;
-            };
+            if (data.total_pages) {
+                progressLabel.textContent = `Processing page ${data.current_page || 0} of ${data.total_pages}`;
+            }
         }
         
-        function showError(message) {
-            document.getElementById('errorMessage').textContent = message;
-            document.getElementById('successResult').classList.add('d-none');
-            document.getElementById('errorResult').classList.remove('d-none');
-            document.getElementById('processAnother').classList.remove('d-none');
+        function resetProgress() {
+            addDebugLog('Resetting progress display');
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            progressStatus.textContent = 'Initializing...';
+            currentPage.textContent = '0';
+            shipmentsFound.textContent = '0';
+            progressLabel.textContent = 'Processing...';
         }
         
-        function resetForm() {
-            selectedFile = null;
-            downloadId = null;
+        function handleProcessingComplete(data) {
+            addDebugLog('Processing completed successfully');
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = '<span>⚡</span>Process Invoice';
+            clearBtn.style.display = 'inline-flex';
             
-            document.getElementById('fileInput').value = '';
-            document.getElementById('fileInfo').classList.add('d-none');
-            document.getElementById('processingStatus').classList.add('d-none');
-            document.getElementById('results').classList.add('d-none');
-            document.getElementById('processAnother').classList.add('d-none');
-            
-            uploadArea.style.display = 'block';
+            if (data.success) {
+                showResult('success', `
+                    <strong>✅ Success!</strong><br>
+                    ${data.message}
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-number">${data.shipment_count}</div>
+                            <div class="stat-label">Shipments</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-number">${data.page_count}</div>
+                            <div class="stat-label">Pages</div>
+                        </div>
+                    </div>
+                    <a href="/download/${downloadFilename}" class="download-link">
+                        <span>💾</span>
+                        Download CSV
+                    </a>
+                `);
+                progressSection.style.display = 'none';
+            } else {
+                showResult('error', `❌ ${data.message}`);
+                progressSection.style.display = 'none';
+            }
+        }
+        
+        function handleProcessingError(data) {
+            addDebugLog('Processing failed with error');
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = '<span>⚡</span>Process Invoice';
+            clearBtn.style.display = 'inline-flex';
+            progressSection.style.display = 'none';
+            showResult('error', `🌐 Error: ${data.error}`);
+        }
+        
+        function showResult(type, message) {
+            addDebugLog(`Showing ${type} result`);
+            result.className = `result ${type}`;
+            result.innerHTML = message;
+            result.style.display = 'block';
         }
     </script>
 </body>
