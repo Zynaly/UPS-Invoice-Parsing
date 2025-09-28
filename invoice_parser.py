@@ -1,285 +1,540 @@
-import torch
-from transformers import LayoutLMv3Processor, LayoutLMv3ForTokenClassification
-from PIL import Image
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
+from PIL import Image
+from matrix_processor import UPSMatrixProcessor
 
 class InvoiceParser:
-    def __init__(self, model_name: str = "microsoft/layoutlmv3-base"):
-        """Initialize LayoutLMv3 model for invoice parsing"""
-        self.processor = LayoutLMv3Processor.from_pretrained(model_name)
-        self.model = LayoutLMv3ForTokenClassification.from_pretrained(model_name)
-    
+    def __init__(self):
+        """Initialize UPS Invoice Matrix Parser with enhanced accuracy"""
+        self.matrix_processor = UPSMatrixProcessor()
+        
     def is_invoice_page(self, words: List[str]) -> bool:
         """Check if page contains invoice data"""
         text_lower = ' '.join(words).lower()
-        indicators = ['delivery service invoice', 'invoice', 'tracking number', 'account number']
+        indicators = [
+            'delivery service invoice', 
+            'tracking number', 
+            'account number',
+            '1z',  # UPS tracking numbers always start with 1Z
+            'published charge',
+            'incentive credit',
+            'billed charge'
+        ]
         return any(indicator in text_lower for indicator in indicators)
-    
+
     def parse_invoice(self, image: Image.Image, words: List[str], boxes: List[List[int]]) -> List[Dict[str, str]]:
         """
-        Parse invoice data from image, words, and boxes
-        Returns list of extracted data (multiple shipments per page)
+        Parse invoice data using enhanced matrix-based extraction
+        Returns list of shipments with all available fields
         """
         if not self.is_invoice_page(words):
             return []
         
         try:
-            # Try LayoutLMv3 extraction first
-            data_list = self._extract_with_layoutlmv3(image, words, boxes)
-            if not data_list:
-                # Fallback to rule-based extraction
-                data_list = self._extract_rule_based(words)
-            return data_list
+            # Combine words with spatial information for better parsing
+            text_with_coords = self._create_spatial_text(words, boxes)
+            full_text = ' '.join(words)
+            
+            print(f"DEBUG: Processing text of length {len(full_text)}")
+            print(f"DEBUG: First 500 chars: {full_text[:500]}")
+            
+            # Extract invoice-level data (common to all shipments)
+            invoice_data = self._extract_invoice_level_data(full_text)
+            print(f"DEBUG: Invoice data extracted: {invoice_data}")
+            
+            # Enhanced shipment matrix splitting using coordinate information
+            shipment_matrices = self._split_into_enhanced_shipment_matrices(full_text, text_with_coords)
+            print(f"DEBUG: Found {len(shipment_matrices)} shipment matrices")
+            
+            # Process each matrix using the enhanced matrix processor
+            result_list = []
+            for i, matrix in enumerate(shipment_matrices):
+                print(f"DEBUG: Processing matrix {i+1}:")
+                print(f"Matrix text preview: {matrix['matrix_text'][:200]}...")
+                
+                shipment_data = self.matrix_processor.process_shipment_matrix(
+                    matrix['matrix_text'], 
+                    invoice_data,
+                    matrix.get('coordinate_data', {})
+                )
+                
+                if shipment_data and shipment_data.get('tracking_number'):
+                    # Add matrix-specific metadata
+                    shipment_data['matrix_index'] = i + 1
+                    shipment_data['processing_type'] = 'Matrix-Based'
+                    result_list.append(shipment_data)
+                    print(f"DEBUG: Shipment {i+1} processed successfully: {shipment_data.get('tracking_number')}")
+                    print(f"DEBUG: Fields populated: {len([k for k, v in shipment_data.items() if v])}")
+                else:
+                    print(f"DEBUG: Matrix {i+1} failed to extract valid shipment data")
+            
+            return result_list
+            
         except Exception as e:
             print(f"Error in parsing: {e}")
-            return self._extract_rule_based(words)
+            import traceback
+            traceback.print_exc()
+            return []
     
-    def _extract_with_layoutlmv3(self, image: Image.Image, words: List[str], boxes: List[List[int]]) -> List[Dict[str, str]]:
-        """Extract using LayoutLMv3 model"""
-        try:
-            encoding = self.processor(image, words, boxes=boxes, return_tensors="pt", 
-                                    truncation=True, padding=True, max_length=512)
-            
-            with torch.no_grad():
-                outputs = self.model(**encoding)
-                # For now, fallback to rule-based as model needs specific training
-                return self._extract_rule_based(words)
-                
-        except Exception as e:
-            print(f"LayoutLMv3 failed: {e}")
-            return self._extract_rule_based(words)
+    def _create_spatial_text(self, words: List[str], boxes: List[List[int]]) -> Dict:
+        """Create spatial mapping of text for better matrix parsing"""
+        spatial_data = {
+            'words': [],
+            'lines': [],
+            'columns': []
+        }
+        
+        # Create word-coordinate pairs
+        word_coords = []
+        for i, (word, box) in enumerate(zip(words, boxes)):
+            word_coords.append({
+                'text': word,
+                'x': box[0],
+                'y': box[1],
+                'width': box[2] - box[0],
+                'height': box[3] - box[1],
+                'index': i
+            })
+        
+        # Group words by approximate lines (same Y coordinate within tolerance)
+        lines = self._group_words_by_lines(word_coords)
+        spatial_data['lines'] = lines
+        
+        # Identify columnar structure
+        columns = self._identify_column_structure(lines)
+        spatial_data['columns'] = columns
+        
+        return spatial_data
     
-    def _extract_rule_based(self, words: List[str]) -> List[Dict[str, str]]:
-        """Rule-based extraction for UPS invoices - extracts ALL shipments from page"""
-        text = ' '.join(words)
+    def _group_words_by_lines(self, word_coords: List[Dict], y_tolerance: int = 5) -> List[List[Dict]]:
+        """Group words into lines based on Y coordinates"""
+        if not word_coords:
+            return []
         
-        print(f"DEBUG: Processing text of length {len(text)}")
-        print(f"DEBUG: First 500 chars: {text[:500]}")
+        # Sort by Y coordinate
+        sorted_words = sorted(word_coords, key=lambda w: w['y'])
         
-        # Extract common invoice-level data (same for all shipments on page)
-        common_data = self._extract_common_invoice_data(text)
-        print(f"DEBUG: Common data extracted: {common_data}")
+        lines = []
+        current_line = [sorted_words[0]]
+        current_y = sorted_words[0]['y']
         
-        # Extract individual shipment data using improved method
-        shipments = self._extract_all_shipments_improved(text)
-        print(f"DEBUG: Found {len(shipments)} shipments")
+        for word in sorted_words[1:]:
+            if abs(word['y'] - current_y) <= y_tolerance:
+                current_line.append(word)
+            else:
+                # Sort current line by X coordinate
+                current_line.sort(key=lambda w: w['x'])
+                lines.append(current_line)
+                current_line = [word]
+                current_y = word['y']
         
-        # Combine common data with each shipment
-        result_list = []
-        for i, shipment in enumerate(shipments):
-            combined_data = {**common_data, **shipment}
-            result_list.append(combined_data)
-            print(f"DEBUG: Shipment {i+1}: {combined_data}")
+        # Don't forget the last line
+        if current_line:
+            current_line.sort(key=lambda w: w['x'])
+            lines.append(current_line)
         
-        return result_list if result_list else []
+        return lines
     
-    def _extract_common_invoice_data(self, text: str) -> Dict[str, str]:
-        """Extract invoice-level data that's common to all shipments"""
-        common_data = {}
+    def _identify_column_structure(self, lines: List[List[Dict]]) -> Dict:
+        """Identify column structure for matrix parsing"""
+        if not lines:
+            return {}
         
-        # Extract Invoice Number
+        # Find common X positions across lines
+        x_positions = {}
+        for line in lines:
+            for word in line:
+                x = word['x']
+                # Group X positions within tolerance
+                matched = False
+                for existing_x in x_positions:
+                    if abs(x - existing_x) <= 20:  # 20px tolerance
+                        x_positions[existing_x].append(word)
+                        matched = True
+                        break
+                if not matched:
+                    x_positions[x] = [word]
+        
+        # Sort columns by X position
+        sorted_columns = sorted(x_positions.items())
+        
+        return {
+            'column_positions': [x for x, words in sorted_columns],
+            'column_data': dict(sorted_columns)
+        }
+    
+    def _extract_invoice_level_data(self, text: str) -> Dict[str, str]:
+        """FIXED: Extract data that's common to all shipments in the invoice with enhanced patterns"""
+        invoice_data = {}
+        
+        # Enhanced Invoice Number patterns
         invoice_patterns = [
-            r'Invoice\s+Number\s+([A-Z0-9]+)',
-            r'Invoice\s+Date.*?Invoice\s+Number\s+([A-Z0-9]+)',
-            r'([0-9A-Z]{10,})\s*(?=.*Account\s+Number)'
+            r'Invoice\s+Number\s+([A-Z0-9]{10,})',
+            r'Invoice\s+Date.*?Invoice\s+Number\s+([A-Z0-9]{10,})',
+            r'([0-9A-Z]{10,})\s*(?=.*Account\s+Number)',
+            r'Invoice\s+Number\s*:\s*([A-Z0-9]{10,})',
+            r'Delivery\s+Service\s+Invoice.*?([0-9A-Z]{10,})'
         ]
+        
         for pattern in invoice_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
-                common_data['invoice_number'] = match.group(1).strip()
+                invoice_data['invoice_number'] = match.group(1).strip()
                 break
         
-        # Extract Account Number  
+        # Enhanced Account Number patterns
         account_patterns = [
-            r'Account\s+Number\s+([A-Z0-9]+)',
-            r'Account\s+([A-Z0-9]{4,})',
+            r'Account\s+Number\s+([A-Z0-9]{4,})',
+            r'Account\s+Number\s*:\s*([A-Z0-9]{4,})',
+            r'Account\s+([A-Z0-9]{4,})(?=\s)',
+            r'AccountNumber\s*([A-Z0-9]{4,})'
         ]
+        
         for pattern in account_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                common_data['account_number'] = match.group(1).strip()
+                invoice_data['account_number'] = match.group(1).strip()
                 break
         
-        # Extract Invoice Date
+        # Enhanced Invoice Date patterns
         date_patterns = [
             r'Invoice\s+Date\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})',
+            r'Invoice\s+Date\s*:\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})',
             r'Invoice\s+Date\s+(\d{1,2}/\d{1,2}/\d{4})',
-            r'Invoice\s+Date\s+(\d{4}-\d{2}-\d{2})',
-            r'(August\s+\d{1,2},\s+\d{4}|July\s+\d{1,2},\s+\d{4}|September\s+\d{1,2},\s+\d{4})'
+            r'((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4})'
         ]
+        
         for pattern in date_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                common_data['invoice_date'] = match.group(1).strip()
+                invoice_data['invoice_date'] = match.group(1).strip()
+                try:
+                    # Try to extract year for date processing
+                    year_match = re.search(r'\d{4}', match.group(1))
+                    if year_match:
+                        invoice_data['invoice_year'] = int(year_match.group())
+                except:
+                    invoice_data['invoice_year'] = datetime.now().year
                 break
         
-        return common_data
+        # Control ID
+        control_patterns = [
+            r'Control\s+ID\s+([A-Z0-9\-#]+)',
+            r'Control\s*ID\s*:\s*([A-Z0-9\-#]+)'
+        ]
+        
+        for pattern in control_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                invoice_data['control_id'] = match.group(1).strip()
+                break
+        
+        # FIXED: Extract sender information from invoice header ONLY
+        # Look for company-level sender info, not shipment-level receiver info
+        sender_patterns = [
+            # Look for company name in invoice header section
+            r'(?:Ship\s+From|Shipped\s+from):\s*([A-Z][A-Za-z0-9\s&\.,\(\)\-\']+?)(?:\s+\d|\n)',
+            r'From:\s*([A-Z][A-Za-z0-9\s&\.,\(\)\-\']+?)(?:\s+\d|\n)',
+            # Look for business names near the top of invoice
+            r'([A-Z][A-Z\s&\.,\(\)\-\']{2,40})\s*\([A-Z\-]+\)',  # Company (CODE) format
+        ]
+        
+        for pattern in sender_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                sender_name = self._clean_company_name(match.group(1))
+                if self._is_valid_company_name(sender_name):
+                    invoice_data['sender_name'] = sender_name
+                    break
+        
+        # FIXED: Extract sender address from invoice header
+        sender_address_patterns = [
+            # Look for address after company name/code
+            r'([A-Z][A-Za-z0-9\s&\.,\(\)\-\']+?)\s*\([A-Z\-]+\)\s*,?\s*(\d+[^\n]+)',
+            r'(?:Ship\s+From|From):\s*[^,\n]+,\s*([0-9][^\n]+)',
+        ]
+        
+        for pattern in sender_address_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            if match:
+                if len(match.groups()) >= 2:
+                    sender_address = self._clean_address(match.group(2))
+                else:
+                    sender_address = self._clean_address(match.group(1))
+                    
+                if self._is_valid_address(sender_address):
+                    invoice_data['sender_address'] = sender_address
+                    break
+        
+        return invoice_data
     
-    def _extract_all_shipments_improved(self, text: str) -> List[Dict[str, str]]:
-        """Improved method to extract all shipments with complete data"""
-        shipments = []
+    def _split_into_enhanced_shipment_matrices(self, text: str, spatial_data: Dict) -> List[Dict]:
+        """Enhanced shipment matrix splitting using both text and coordinate data"""
+        matrices = []
         
-        # Step 1: Find all shipment blocks (date + tracking number + everything until next shipment)
-        # Pattern to find shipment boundaries
-        shipment_boundary_pattern = r'(\d{2}/\d{2})\s+(1Z[A-Z0-9]{16})'
+        # Primary pattern: tracking numbers with dates
+        tracking_pattern = r'(\d{2}/\d{2}(?:/\d{2,4})?)\s+(1Z[A-Z0-9]{16})'
+        boundaries = list(re.finditer(tracking_pattern, text))
         
-        # Find all boundaries
-        boundaries = list(re.finditer(shipment_boundary_pattern, text))
-        print(f"DEBUG: Found {len(boundaries)} shipment boundaries")
+        print(f"DEBUG: Found {len(boundaries)} primary shipment boundaries")
+        
+        # If no primary boundaries found, try alternative patterns
+        if not boundaries:
+            alt_patterns = [
+                r'(1Z[A-Z0-9]{16})',  # Just tracking numbers
+                r'(\d{2}/\d{2})\s+.*?(Ground|Air|Express)',  # Date + service
+                r'(Tracking\s+Number:?\s*1Z[A-Z0-9]{16})'
+            ]
+            
+            for alt_pattern in alt_patterns:
+                boundaries = list(re.finditer(alt_pattern, text, re.IGNORECASE))
+                if boundaries:
+                    print(f"DEBUG: Found {len(boundaries)} boundaries using alternative pattern")
+                    break
         
         for i, boundary in enumerate(boundaries):
-            shipment_date = boundary.group(1)
-            tracking_number = boundary.group(2)
-            
-            # Define the text block for this shipment
+            # Define matrix boundaries
             start_pos = boundary.start()
+            
+            # Find end position
             if i + 1 < len(boundaries):
                 end_pos = boundaries[i + 1].start()
             else:
-                end_pos = len(text)
-            
-            shipment_block = text[start_pos:end_pos]
-            print(f"\nDEBUG: === SHIPMENT {i+1} ===")
-            print(f"DEBUG: Date: {shipment_date}, Tracking: {tracking_number}")
-            print(f"DEBUG: Block (first 200 chars): {shipment_block[:200]}...")
-            
-            # Extract receiver data from this block
-            receiver_data = self._extract_receiver_data_comprehensive(shipment_block)
-            
-            shipment_data = {
-                'shipment_date': shipment_date,
-                'tracking_number': tracking_number,
-                'receiver_name': receiver_data.get('receiver_name', ''),
-                'receiver_address': receiver_data.get('receiver_address', '')
-            }
-            
-            print(f"DEBUG: Extracted - Name: '{receiver_data.get('receiver_name', 'NOT_FOUND')}', Address: '{receiver_data.get('receiver_address', 'NOT_FOUND')}'")
-            
-            shipments.append(shipment_data)
-        
-        return shipments
-    
-    def _extract_receiver_data_comprehensive(self, block: str) -> Dict[str, str]:
-        """Comprehensive receiver data extraction from a shipment block"""
-        receiver_data = {'receiver_name': '', 'receiver_address': ''}
-        
-        # Clean the block - normalize whitespace
-        block = ' '.join(block.split())
-        
-        print(f"DEBUG: Processing block: {block[:300]}...")
-        
-        # Method 1: Look for explicit "Receiver:" pattern
-        receiver_patterns = [
-            # Pattern: Receiver: NAME ADDRESS
-            r'Receiver:\s*([A-Z][A-Z\s]+?)\s+(\d+\s+[A-Z0-9\s,.-]+?[A-Z]{2}\s+\d{5}(?:-\d{4})?)',
-            # Pattern: Receiver: NAME then address on next lines
-            r'Receiver:\s*([A-Z][A-Z\s]{5,40}?)\s+((?:\d+\s+)?[A-Z0-9\s,.-]+)',
-        ]
-        
-        for pattern in receiver_patterns:
-            match = re.search(pattern, block, re.IGNORECASE)
-            if match:
-                name = self._clean_name(match.group(1))
-                address = self._clean_address(match.group(2))
+                # Look for natural end markers with enhanced patterns
+                end_markers = [
+                    r'Total\s+for\s+Internet[-\s]*ID',
+                    r'Total\s+Shipping\s+API',
+                    r'Message\s+Codes:',
+                    r'Page\s+\d+\s+of\s+\d+',
+                    r'=== (?:INVOICE|END)',
+                    r'Consolidated\s+(?:Billing|Remittance)',
+                    r'Invoice\s+Messaging',
+                    r'Code\s+Message',
+                    r'\d{2}/\d{2}\s+1Z[A-Z0-9]{16}'  # Next shipment
+                ]
                 
-                if len(name) > 3 and len(address) > 10:
-                    receiver_data['receiver_name'] = name
-                    receiver_data['receiver_address'] = address
-                    print(f"DEBUG: Method 1 success - Name: '{name}', Address: '{address}'")
-                    return receiver_data
-        
-        # Method 2: Look for name patterns followed by address patterns
-        # Find potential names (2+ consecutive capitalized words)
-        name_matches = re.finditer(r'\b([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})*)\b', block)
-        
-        for name_match in name_matches:
-            potential_name = name_match.group(1)
+                end_pos = len(text)
+                for marker in end_markers:
+                    marker_match = re.search(marker, text[start_pos:], re.IGNORECASE)
+                    if marker_match:
+                        potential_end = start_pos + marker_match.start()
+                        if potential_end > start_pos + 50:  # Minimum matrix size
+                            end_pos = potential_end
+                            break
             
-            # Skip obvious non-names
-            if re.match(r'^(DELIVERY|SERVICE|INVOICE|CUSTOMER|WEIGHT|RESIDENTIAL|SURCHARGE|FUEL|DIMENSIONS|TOTAL|USERIDS?|SENDER|RECEIVER|GROUND|NEXT|DAY|AIR|TRACKING|NUMBER|ACCOUNT|PAGE)(\s+\w+)*$', potential_name, re.IGNORECASE):
+            matrix_text = text[start_pos:end_pos].strip()
+            
+            # Skip if matrix is too small
+            if len(matrix_text) < 50:
                 continue
             
-            # Look for address after this name
-            # Get text after the name
-            remaining_text = block[name_match.end():]
+            # Extract coordinate data for this matrix if available
+            coordinate_data = self._extract_matrix_coordinates(spatial_data, start_pos, end_pos)
             
-            # Look for address patterns in the remaining text
-            address_patterns = [
-                r'^\s*(\d+\s+[A-Z\s]+(?:AVE|AVENUE|ST|STREET|DRIVE|DR|CT|COURT|RD|ROAD|BLVD|BOULEVARD|LANE|LN|WAY|PLACE|PL)\s+[A-Z\s]*[A-Z]{2}\s+\d{5}(?:-\d{4})?)',
-                r'^\s*([A-Z0-9\s,.-]*\d+[A-Z0-9\s,.-]*[A-Z]{2}\s+\d{5}(?:-\d{4})?)',
-            ]
+            # Extract basic tracking info
+            tracking_match = re.search(r'1Z[A-Z0-9]{16}', matrix_text)
+            date_match = re.search(r'\d{2}/\d{2}(?:/\d{2,4})?', matrix_text)
             
-            for addr_pattern in address_patterns:
-                addr_match = re.search(addr_pattern, remaining_text, re.IGNORECASE)
-                if addr_match:
-                    name = self._clean_name(potential_name)
-                    address = self._clean_address(addr_match.group(1))
-                    
-                    if len(name) > 3 and len(address) > 10:
-                        receiver_data['receiver_name'] = name
-                        receiver_data['receiver_address'] = address
-                        print(f"DEBUG: Method 2 success - Name: '{name}', Address: '{address}'")
-                        return receiver_data
-        
-        # Method 3: Extract any address-like pattern and see if there's a name before it
-        all_addresses = re.finditer(r'(\d+\s+[A-Z\s,.-]+[A-Z]{2}\s+\d{5}(?:-\d{4})?)', block, re.IGNORECASE)
-        
-        for addr_match in all_addresses:
-            address = self._clean_address(addr_match.group(1))
+            matrix_info = {
+                'matrix_text': matrix_text,
+                'shipment_date': date_match.group() if date_match else None,
+                'tracking_number': tracking_match.group() if tracking_match else None,
+                'start_pos': start_pos,
+                'end_pos': end_pos,
+                'coordinate_data': coordinate_data,
+                'matrix_length': len(matrix_text)
+            }
             
-            # Look for name before this address
-            text_before = block[:addr_match.start()]
-            name_pattern = r'([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})*)\s*$'
-            name_match = re.search(name_pattern, text_before)
+            matrices.append(matrix_info)
             
-            if name_match:
-                name = self._clean_name(name_match.group(1))
-                
-                if len(name) > 3 and len(address) > 10:
-                    receiver_data['receiver_name'] = name
-                    receiver_data['receiver_address'] = address
-                    print(f"DEBUG: Method 3 success - Name: '{name}', Address: '{address}'")
-                    return receiver_data
+            print(f"DEBUG: Matrix {i+1} created:")
+            print(f"  - Date: {matrix_info['shipment_date']}")
+            print(f"  - Tracking: {matrix_info['tracking_number']}")
+            print(f"  - Length: {matrix_info['matrix_length']}")
         
-        # Method 4: Last resort - just extract any name and any address separately
-        if not receiver_data['receiver_name']:
-            name_matches = re.findall(r'\b([A-Z]{3,}\s+[A-Z]{3,})\b', block)
-            for name in name_matches:
-                if not re.match(r'^(DELIVERY|SERVICE|INVOICE|CUSTOMER|WEIGHT|RESIDENTIAL|SURCHARGE|FUEL|DIMENSIONS|TOTAL|USERIDS?|SENDER|RECEIVER|GROUND|NEXT|DAY|AIR|TRACKING|NUMBER|ACCOUNT|PAGE)(\s+\w+)?$', name, re.IGNORECASE):
-                    receiver_data['receiver_name'] = self._clean_name(name)
-                    break
-        
-        if not receiver_data['receiver_address']:
-            addr_matches = re.findall(r'(\d+\s+[A-Z\s,.-]+[A-Z]{2}\s+\d{5}(?:-\d{4})?)', block, re.IGNORECASE)
-            if addr_matches:
-                receiver_data['receiver_address'] = self._clean_address(addr_matches[0])
-        
-        print(f"DEBUG: Method 4 (fallback) - Name: '{receiver_data.get('receiver_name', 'NOT_FOUND')}', Address: '{receiver_data.get('receiver_address', 'NOT_FOUND')}'")
-        return receiver_data
+        return matrices
     
-    def _clean_name(self, name: str) -> str:
-        """Clean and validate name"""
+    def _extract_matrix_coordinates(self, spatial_data: Dict, start_pos: int, end_pos: int) -> Dict:
+        """Extract coordinate information for a specific matrix section"""
+        # This would require mapping text positions to coordinate data
+        # For now, return empty dict - can be enhanced later
+        return {}
+    
+    def _is_valid_company_name(self, name: str) -> bool:
+        """FIXED: Validate if extracted text is a valid company name"""
+        if not name or len(name) < 2:
+            return False
+        
+        # Invalid if contains common non-company terms
+        invalid_terms = [
+            'total', 'charge', 'published', 'incentive', 'billed', 'surcharge',
+            'weight', 'dimensions', 'customer', 'fuel', 'residential',
+            'message', 'codes', 'adjustment', 'billing', 'correction',
+            'internet-id', 'shipping', 'api', 'outbound', 'invoice', 'number',
+            'date', 'account', 'ground', 'air', 'express', 'next', 'day',
+            'tracking', 'zone', 'pickup', 'delivery'
+        ]
+        
+        name_lower = name.lower()
+        for term in invalid_terms:
+            if term in name_lower:
+                return False
+        
+        # Valid if contains typical company name patterns
+        return bool(re.match(r'^[A-Z][A-Za-z0-9\s&\.,\(\)\-\']+$', name))
+    
+    def _is_valid_name(self, name: str) -> bool:
+        """Validate if extracted text is a valid person name"""
+        if not name or len(name) < 2:
+            return False
+        
+        # Invalid if contains common non-name terms
+        invalid_terms = [
+            'total', 'charge', 'published', 'incentive', 'billed', 'surcharge',
+            'weight', 'dimensions', 'customer', 'fuel', 'residential',
+            'message', 'codes', 'adjustment', 'billing', 'correction',
+            'internet-id', 'shipping', 'api', 'outbound', 'invoice', 'number',
+            'date', 'account', 'ground', 'air', 'express', 'tracking'
+        ]
+        
+        name_lower = name.lower()
+        for term in invalid_terms:
+            if term in name_lower:
+                return False
+        
+        # Valid if contains typical name patterns (person names)
+        return bool(re.match(r'^[A-Z][A-Za-z\s\.\-\']+$', name))
+    
+    def _is_valid_address(self, address: str) -> bool:
+        """Validate if extracted text is a valid address"""
+        if not address or len(address) < 5:
+            return False
+        
+        # Should start with a number and contain address keywords
+        address_indicators = ['street', 'st', 'avenue', 'ave', 'drive', 'dr', 'road', 'rd', 'court', 'ct', 'boulevard', 'blvd', 'lane', 'ln']
+        
+        return (address[0].isdigit() and 
+                any(indicator in address.lower() for indicator in address_indicators))
+    
+    def _clean_company_name(self, name: str) -> str:
+        """FIXED: Clean and validate company name field"""
         if not name:
             return ''
         
-        # Remove common non-name words and clean up
-        name = re.sub(r'\s+(Customer|Weight|Residential|Surcharge|Fuel|Next|Day|Air|Ground|Total)', '', name, flags=re.IGNORECASE)
-        name = ' '.join(name.split())  # Normalize whitespace
+        # Remove common non-company words
+        exclusions = [
+            'Customer', 'Weight', 'Residential', 'Surcharge', 'Fuel', 
+            'Next', 'Day', 'Air', 'Ground', 'Total', 'Published', 'Incentive',
+            'Charge', 'Credit', 'Billed', 'Dimensions', 'Message', 'Codes',
+            'Internet-ID', 'Shipping', 'API', 'Outbound', 'Adjustment',
+            'Billing', 'Correction', 'Goodwill', 'Invoice', 'Number', 'Date',
+            'Account', 'Tracking', 'Zone', 'Pickup', 'Delivery'
+        ]
         
-        return name.strip()
+        cleaned = name
+        for exclusion in exclusions:
+            cleaned = re.sub(rf'\b{exclusion}\b', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove monetary values and numbers that aren't part of names
+        cleaned = re.sub(r'\$?[\d,]+\.\d{2}', '', cleaned)
+        cleaned = re.sub(r'\b\d+(?:\.\d+)?\s*(?:lb|lbs)\b', '', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up whitespace and punctuation
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = cleaned.strip(' .,:-')
+        
+        return cleaned
+    
+    def _clean_name(self, name: str) -> str:
+        """Clean and validate name field with enhanced cleaning"""
+        if not name:
+            return ''
+        
+        # Remove common non-name words more aggressively
+        exclusions = [
+            'Customer', 'Weight', 'Residential', 'Surcharge', 'Fuel', 
+            'Next', 'Day', 'Air', 'Ground', 'Total', 'Published', 'Incentive',
+            'Charge', 'Credit', 'Billed', 'Dimensions', 'Message', 'Codes',
+            'Internet-ID', 'Shipping', 'API', 'Outbound', 'Adjustment',
+            'Billing', 'Correction', 'Goodwill', 'Invoice', 'Number', 'Date',
+            'Account'
+        ]
+        
+        cleaned = name
+        for exclusion in exclusions:
+            cleaned = re.sub(rf'\b{exclusion}\b', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove monetary values and numbers that aren't part of names
+        cleaned = re.sub(r'\$?[\d,]+\.\d{2}', '', cleaned)
+        cleaned = re.sub(r'\b\d+(?:\.\d+)?\s*(?:lb|lbs)\b', '', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up whitespace and punctuation
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = cleaned.strip(' .,:-')
+        
+        return cleaned
     
     def _clean_address(self, address: str) -> str:
-        """Clean and validate address"""
+        """Clean and validate address field"""
         if not address:
             return ''
         
-        # Remove prices and weights
-        address = re.sub(r'\s*\d+\.\d+\s*-?\d*\.\d*\s*\d+\.\d+\s*', ' ', address)
-        # Remove common invoice terms
-        address = re.sub(r'\s+(Customer Weight|Residential Surcharge|Fuel Surcharge|Total|1st ref|UserID|Sender).*', '', address, flags=re.IGNORECASE)
-        # Normalize whitespace
-        address = ' '.join(address.split())
+        # Remove monetary values and invoice-specific terms
+        cleaned = re.sub(r'\$?[\d,]+\.\d{2}(?:\s*-?[\d,]+\.\d{2})*', '', address)
+        cleaned = re.sub(r'Total|Published|Incentive|Billed|Customer|Weight|Dimensions', '', cleaned, flags=re.IGNORECASE)
         
-        return address.strip()
+        # Clean up whitespace
+        cleaned = ' '.join(cleaned.split()).strip()
+        
+        return cleaned
+    
+    def _parse_currency(self, value: str) -> Optional[float]:
+        """Parse currency string to float"""
+        if not value:
+            return None
+        try:
+            return float(value.replace(',', '').replace('$', '').strip())
+        except (ValueError, TypeError):
+            return None
+    
+    def _parse_float(self, value: str) -> Optional[float]:
+        """Parse float value"""
+        if not value:
+            return None
+        try:
+            return float(value.replace(',', '').strip())
+        except (ValueError, TypeError):
+            return None
+    
+    def _parse_integer(self, value: str) -> Optional[int]:
+        """Parse integer value"""
+        if not value:
+            return None
+        try:
+            return int(value.replace(',', '').strip())
+        except (ValueError, TypeError):
+            return None
+    
+    def _parse_date(self, value: str, invoice_year: int = None) -> Optional[str]:
+        """Parse date value and return in ISO format"""
+        if not value:
+            return None
+        try:
+            # Handle MM/DD format
+            if re.match(r'\d{1,2}/\d{1,2}$', value):
+                month, day = value.split('/')
+                year = invoice_year or datetime.now().year
+                return f"{year}-{int(month):02d}-{int(day):02d}"
+            # Handle MM/DD/YYYY format
+            elif re.match(r'\d{1,2}/\d{1,2}/\d{2,4}$', value):
+                month, day, year = value.split('/')
+                if len(year) == 2:
+                    year = 2000 + int(year)
+                return f"{int(year)}-{int(month):02d}-{int(day):02d}"
+            # Handle full date formats
+            else:
+                return value.strip()
+        except (ValueError, IndexError):
+            return value.strip()
+ 
